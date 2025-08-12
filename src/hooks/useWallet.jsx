@@ -82,7 +82,7 @@ export const useWallet = () => {
       setHasAttemptedAutoConnect(true);
     };
     tryAutoConnect();
-  }, [connect, isConnected, address, chainId]);
+  }, [connect, isConnected, address, chainId, hasAttemptedAutoConnect]);
 
   // Log wallet state
   useEffect(() => {
