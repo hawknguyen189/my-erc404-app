@@ -1,188 +1,258 @@
-import React, { useRef, useEffect, useContext, useState } from 'react';
-import { AppContext } from '../contexts/AppContext';
-import { useERC404, useStaking } from '../hooks/index.js';
+import React, { useRef, useState, useEffect } from "react";
+import { useAsteroidContext } from "../context/AsteroidContext";
+
+const GALAXY_WIDTH = 1000;
+const GALAXY_HEIGHT = 1000;
 
 const AsteroidMap = () => {
-  const canvasRef = useRef(null);
-  const animationRef = useRef(); // Moved to top level
-  const { walletAddress, signer } = useContext(AppContext);
-  const planet = useERC404(signer); // Single planet object
-  const { stakeResources, asteroid } = useStaking(signer); // Single asteroid object
+  const mapRef = useRef(null);
   const [scale, setScale] = useState(1);
-  const [offsetX, setOffsetX] = useState(0);
-  const [offsetY, setOffsetY] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [startY, setStartY] = useState(0);
-  const [galaxyData, setGalaxyData] = useState({ planet: {}, asteroid: {} }); // Single objects
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [start, setStart] = useState({ x: 0, y: 0 });
+  const [wasDragging, setWasDragging] = useState(false);
+  const [clickedCoords, setClickedCoords] = useState(null);
 
-  const galaxyImage = new Image();
-  galaxyImage.src = 'public/galaxy-map.png'; // Verify this path
-  galaxyImage.onload = () => {
-    console.log('Galaxy image loaded successfully at:', galaxyImage.src);
-    setImageLoaded(true);
+  const { objects, selected, setSelected } = useAsteroidContext();
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const handleWheel = (e) => {
+      e.preventDefault();
+      let newScale = scale + (e.deltaY < 0 ? 0.1 : -0.1);
+      newScale = Math.max(0.5, Math.min(newScale, 3));
+      setScale(newScale);
+    };
+    map.addEventListener("wheel", handleWheel, { passive: false });
+    return () => map.removeEventListener("wheel", handleWheel);
+  }, [scale]);
+
+  // Mouse drag handlers
+  const handleMouseDown = (e) => {
+    setDragging(true);
+    setWasDragging(false);
+    setStart({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
-  galaxyImage.onerror = () => console.error('Failed to load galaxy-map.png. Check path:', galaxyImage.src);
 
-  // Update galaxyData only when planet or asteroid changes
-  useEffect(() => {
-    console.log('AsteroidMap planet:', planet);
-    console.log('AsteroidMap asteroid:', asteroid);
-    console.log('AsteroidMap galaxyData before update:', galaxyData);
-    setGalaxyData({
-      planet: planet || {},
-      asteroid: asteroid || {},
+  const handleMouseMove = (e) => {
+    if (!dragging) return;
+    setPosition({
+      x: e.clientX - start.x,
+      y: e.clientY - start.y,
     });
-    console.log('AsteroidMap galaxyData after update:', galaxyData);
-  }, [planet, asteroid]); // Only on planet/asteroid change
+    setWasDragging(true);
+  };
 
-  // Handle canvas rendering and events
-  useEffect(() => {
-    if (!imageLoaded) return;
+  const handleMouseUp = () => setDragging(false);
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+  // Touch drag handlers
+  const handleTouchStart = (e) => {
+    setDragging(true);
+    setWasDragging(false);
+    const touch = e.touches[0];
+    setStart({ x: touch.clientX - position.x, y: touch.clientY - position.y });
+  };
 
-    canvas.width = 800;
-    canvas.height = 600;
+  const handleTouchMove = (e) => {
+    if (!dragging) return;
+    const touch = e.touches[0];
+    setPosition({
+      x: touch.clientX - start.x,
+      y: touch.clientY - start.y,
+    });
+    setWasDragging(true);
+  };
 
-    const handleWheel = (event) => {
-      event.preventDefault();
-      const zoomSpeed = 0.1;
-      const newScale = scale + event.deltaY * -zoomSpeed * 0.01;
-      setScale(Math.min(Math.max(0.5, newScale), 2));
-    };
+  const handleTouchEnd = () => setDragging(false);
 
-    const handleMouseDown = (event) => {
-      setIsDragging(true);
-      setStartX(event.clientX - offsetX);
-      setStartY(event.clientY - offsetY);
-    };
+  // Show coordinates when clicking the map (not a marker)
+  const handleClick = (e) => {
+    if (wasDragging) return;
+    const rect = mapRef.current.getBoundingClientRect();
+    // Calculate coordinates relative to the transformed map
+    const x = Math.round((e.clientX - rect.left - position.x) / scale);
+    const y = Math.round((e.clientY - rect.top - position.y) / scale);
+    if (x >= 0 && x <= GALAXY_WIDTH && y >= 0 && y <= GALAXY_HEIGHT) {
+      setClickedCoords({ x, y });
+      setSelected(null);
+    }
+  };
 
-    const handleMouseMove = (event) => {
-      if (isDragging) {
-        const newOffsetX = event.clientX - startX;
-        const newOffsetY = event.clientY - startY;
-        setOffsetX(newOffsetX);
-        setOffsetY(newOffsetY);
-      }
-    };
-
-    const handleMouseUp = () => setIsDragging(false);
-
-    const drawMap = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.save();
-      ctx.translate(offsetX, offsetY);
-      ctx.scale(scale, scale);
-
-      if (imageLoaded) {
-        ctx.drawImage(galaxyImage, 0, 0, 1200, 900, -offsetX / scale, -offsetY / scale, 1200 / scale, 900 / scale);
-      }
-
-      // Draw single planet
-      if (galaxyData.planet && typeof galaxyData.planet.x === 'number' && typeof galaxyData.planet.y === 'number') {
-        ctx.beginPath();
-        ctx.arc(galaxyData.planet.x, galaxyData.planet.y, 20, 0, Math.PI * 2);
-        ctx.fillStyle = galaxyData.planet.owner === walletAddress ? 'green' : 'blue';
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.stroke();
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.fillText(galaxyData.planet.name || 'Unnamed', galaxyData.planet.x - 10, galaxyData.planet.y - 25);
-      }
-
-      // Draw single asteroid
-      if (galaxyData.asteroid && typeof galaxyData.asteroid.x === 'number' && typeof galaxyData.asteroid.y === 'number') {
-        ctx.beginPath();
-        ctx.arc(galaxyData.asteroid.x, galaxyData.asteroid.y, 10, 0, Math.PI * 2);
-        ctx.fillStyle = galaxyData.asteroid.owner === walletAddress ? 'green' : 'gray';
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.stroke();
-        ctx.fillStyle = 'white';
-        ctx.font = '10px Arial';
-        ctx.fillText(galaxyData.asteroid.name || 'Unnamed', galaxyData.asteroid.x - 10, galaxyData.asteroid.y - 15);
-      }
-
-      ctx.restore();
-    };
-
-    const handleClick = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = (event.clientX - rect.left - offsetX) / scale;
-      const y = (event.clientY - rect.top - offsetY) / scale;
-      console.log('Click event - x:', x, 'y:', y);
-
-      const performAction = (type, data, action) => {
-        if (data && typeof data === 'object' && data.id && data.name && typeof data.x === 'number' && typeof data.y === 'number') {
-          console.log('Selected object data:', data);
-          if (walletAddress && !data.owner) {
-            (async () => {
-              try {
-                await action();
-                setGalaxyData(prev => ({
-                  ...prev,
-                  [type]: { ...prev[type], owner: walletAddress },
-                }));
-              } catch (error) {
-                console.error(`Error ${type === 'planet' ? 'staking' : 'claiming'}:`, error);
-              }
-            })();
-          }
-        } else {
-          console.error('Invalid data selected:', data);
-        }
-      };
-
-      // Check for planet click
-      if (galaxyData.planet && typeof galaxyData.planet.x === 'number' && typeof galaxyData.planet.y === 'number') {
-        const distance = Math.sqrt((x - galaxyData.planet.x) ** 2 + (y - galaxyData.planet.y) ** 2);
-        if (distance < 20) {
-          performAction('planet', galaxyData.planet, () => stakeResources({ args: [galaxyData.planet.id, 10] }));
-        }
-      }
-
-      // Check for asteroid click
-      if (galaxyData.asteroid && typeof galaxyData.asteroid.x === 'number' && typeof galaxyData.asteroid.y === 'number') {
-        const distance = Math.sqrt((x - galaxyData.asteroid.x) ** 2 + (y - galaxyData.asteroid.y) ** 2);
-        if (distance < 10) {
-          performAction('asteroid', galaxyData.asteroid, () => stakeResources({ args: [galaxyData.asteroid.id, 5] }));
-        }
-      }
-    };
-
-    canvas.addEventListener('wheel', handleWheel);
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('mouseleave', handleMouseUp);
-    canvas.addEventListener('click', handleClick);
-
-    // Use requestAnimationFrame with ref
-    const animate = () => {
-      drawMap();
-      animationRef.current = requestAnimationFrame(animate);
-    };
-    animationRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      canvas.removeEventListener('wheel', handleWheel);
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
-      canvas.removeEventListener('mouseleave', handleMouseUp);
-      canvas.removeEventListener('click', handleClick);
-    };
-  }, [imageLoaded]); // Only re-run when image loads
+  // Marker click handler
+  const handleMarkerClick = (obj) => {
+    setSelected(obj);
+    setClickedCoords(null);
+  };
 
   return (
-    <div className="text-center">
-      <h2>Asteroid Map</h2>
-      <canvas ref={canvasRef} style={{ border: '1px solid white' }} />
+    <div
+      style={{
+        width: "100%",
+        height: "400px",
+        overflow: "hidden",
+        position: "relative",
+        background: "#000",
+        cursor: dragging ? "grabbing" : "grab",
+        userSelect: "none",
+      }}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      ref={mapRef}
+    >
+      {/* The transformed container */}
+      <div
+        style={{
+          width: GALAXY_WIDTH,
+          height: GALAXY_HEIGHT,
+          position: "absolute",
+          left: position.x,
+          top: position.y,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <img
+          src="/galaxy-map.png"
+          alt="Galaxy Map"
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            pointerEvents: "none",
+            userSelect: "none",
+            position: "absolute",
+            left: 0,
+            top: 0,
+          }}
+          draggable={false}
+        />
+        {/* Render markers only inside galaxy map area */}
+        {objects
+          .filter(
+            (obj) =>
+              obj.x >= 0 &&
+              obj.x <= GALAXY_WIDTH &&
+              obj.y >= 0 &&
+              obj.y <= GALAXY_HEIGHT
+          )
+          .map((obj) => (
+            <div
+              key={obj.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMarkerClick(obj);
+              }}
+              style={{
+                position: "absolute",
+                left: obj.x - (obj.type === "planet" ? 16 : 10),
+                top: obj.y - (obj.type === "planet" ? 16 : 10),
+                width: obj.type === "planet" ? 32 : 20,
+                height: obj.type === "planet" ? 32 : 20,
+                borderRadius: "50%",
+                background: obj.type === "planet" ? "#4fc3f7" : "#bdbdbd",
+                border:
+                  obj.type === "planet"
+                    ? "2px solid #1976d2"
+                    : "1px solid #888",
+                cursor: "pointer",
+                boxShadow: "0 0 8px #fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2,
+              }}
+              title={`${obj.name} (${obj.x}, ${obj.y})`}
+            >
+              {obj.type === "planet" ? "🪐" : "🪨"}
+            </div>
+          ))}
+      </div>
+      {/* Info popup for marker */}
+      {selected && (
+        <div
+          style={{
+            position: "absolute",
+            left: 20,
+            top: 20,
+            background: "#222",
+            color: "#fff",
+            padding: "12px 18px",
+            borderRadius: "8px",
+            zIndex: 10,
+            boxShadow: "0 2px 12px #000a",
+          }}
+        >
+          <strong>{selected.name}</strong>
+          <div>{selected.info}</div>
+          <div>
+            <small>
+              Coordinates: ({selected.x}, {selected.y})
+            </small>
+          </div>
+          <button
+            style={{
+              marginTop: "8px",
+              background: "#444",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              cursor: "pointer",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelected(null);
+            }}
+          >
+            Close
+          </button>
+        </div>
+      )}
+      {/* Info popup for map click */}
+      {clickedCoords && (
+        <div
+          style={{
+            position: "absolute",
+            left: 20,
+            top: 70,
+            background: "#222",
+            color: "#fff",
+            padding: "10px 16px",
+            borderRadius: "8px",
+            zIndex: 10,
+            boxShadow: "0 2px 12px #000a",
+          }}
+        >
+          <strong>Coordinates</strong>
+          <div>
+            ({clickedCoords.x}, {clickedCoords.y})
+          </div>
+          <button
+            style={{
+              marginTop: "8px",
+              background: "#444",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              cursor: "pointer",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setClickedCoords(null);
+            }}
+          >
+            Close
+          </button>
+        </div>
+      )}
     </div>
   );
 };
